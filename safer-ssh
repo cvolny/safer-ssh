@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# ssh-confirm — show resolved target and ask before connecting
+set -euo pipefail
+
+# Directory to cache safe-ssh resolution information in
+CACHE="$HOME/.ssh/safe-ssh-cache"
+# Options that take a value are skipped along with their value.
+VALUE_OPTS=(-b -c -D -e -F -I -i -J -l -m -O -o -p -Q -w)
+PREFIX="safe-ssh"
+
+function init()
+{
+  local args=( "$@" )
+  local i=0
+  local a
+
+  while (( i < ${#args[@]} ))
+  do
+    a="${args[i]}"
+    for v in "${VALUE_OPTS[@]}"; do
+      if [[ "$a" == "$v" ]]
+      then
+        i=$((i++))
+        continue 2; #eg -p 2222
+      elif [[ "$a" == "$v"* ]]
+      then
+        continue 2; #eg -p2222
+      fi
+    done
+    if [[ "$a" != -* ]]
+    then
+      echo $a
+      return
+    fi
+    ((i++))
+  done
+}
+
+function main()
+{
+  local dest=$( init "$@" )
+  local resolved=$(
+    ssh -G "$dest" 2>/dev/null \
+      | awk \
+        '
+        $1=="hostname" {h=$2}
+        $1=="resolvedaddress" {a=$2}
+        $1=="user" {u=$2}
+        END {print h":"a":"u}
+        '
+  )
+  local key="$(printf '%s' "$dest" | tr '/@:' '_')"
+  local record_file="$CACHE/$key"
+  local new_fqdn
+  local new_ip
+  local new_user
+  local old_fqdn
+  local old_ip
+  local old_user
+
+  mkdir -p $(dirname "$record_file")
+  IFS=':' read -r new_fqdn new_ip new_user <<< "$resolved"
+  if [[ -z "$new_ip" ]]
+  then
+    new_ip=$(
+      dscacheutil -q host -a name "$new_fqdn" 2>/dev/null \
+        | awk '/ip_address/{print $2; exit}'
+    )
+  fi
+
+  if [[ -f "$record_file" ]]
+  then
+    IFS=':' read -r old_fqdn old_ip old_user < "$record_file"
+    if [[ "$old_fqdn" == "$new_fqdn" && "$old_ip" == "$new_ip" ]]
+    then
+        exec ssh "$@"
+    fi
+    echo "$PREFIX ==> CHANGED: $dest was $old_user@$old_fqdn${old_ip:+ ($old_ip)}"
+    echo "$PREFIX ==> CURRENT: $dest now $new_user@$new_fqdn${new_ip:+ ($new_ip)}"
+  else
+    echo "$PREFIX ==> FIRST TIME for $dest -> $new_user@$new_fqdn${new_ip:+ ($new_ip)}"
+  fi
+
+  read -r -p "connect? [y/N] " reply
+  [[ "$reply" =~ ^[Yy]$ ]] || exit 1
+
+  printf '%s:%s:%s\n' "$new_fqdn" "$new_ip" "$new_user" > "$record_file"
+  exec ssh "$@"
+}
+
+main "$@"
