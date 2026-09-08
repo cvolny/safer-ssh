@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# ssh-confirm — show resolved target and ask before connecting
+# safer-ssh — show resolved target and ask before connecting
 set -euo pipefail
 
-# Directory to cache safe-ssh resolution information in
-CACHE="$HOME/.ssh/safe-ssh-cache"
+# Directory to cache safer-ssh resolution information in
+CACHE="$HOME/.ssh/safer-ssh-cache"
 # Options that take a value are skipped along with their value.
 VALUE_OPTS=(-b -c -D -e -F -I -i -J -l -m -O -o -p -Q -w)
-PREFIX="safe-ssh"
+PREFIX="safer-ssh"
 
 function init()
 {
